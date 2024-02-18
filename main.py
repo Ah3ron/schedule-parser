@@ -1,4 +1,7 @@
+from datetime import datetime, timedelta
 import asyncio
+import json
+import re
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -49,12 +52,73 @@ def extract_week_start_dates(content):
     return week_dates
 
 
+def extract_schedule(content):
+    soup = BeautifulSoup(content, "lxml")
+    table = soup.find("tbody", id="weeks-filter")
+
+    schedule = []
+    current_day_of_week = None
+
+    week_start_dates = extract_week_start_dates(content)
+
+    for row in table.find_all("tr"):
+        if "wa" in row["class"]:
+            current_day_of_week = row.find("th").text
+            continue
+
+        for class_name in row["class"]:
+            if not class_name.startswith("w"):
+                continue
+
+            lesson_info = row.find_all("td")
+
+            lesson = {
+                "date": calculate_date(
+                    week_start_dates[class_name[1:]], current_day_of_week
+                ),
+                "day_of_week": current_day_of_week,
+                "time": lesson_info[0].text,
+                "name": lesson_info[1].text,
+                "location": lesson_info[2].text or None,
+                "teacher": lesson_info[3].text or None,
+                "group": lesson_info[4].text or None,
+            }
+
+            schedule.append(lesson)
+
+    return schedule
+
+
+def convert_day_to_number(day_of_week):
+    day_numbers = {
+        "Понедельник": 0,
+        "Вторник": 1,
+        "Среда": 2,
+        "Четверг": 3,
+        "Пятница": 4,
+        "Суббота": 5,
+        "Воскресенье": 6,
+    }
+
+    return day_numbers.get(day_of_week, -1)
+
+
+def calculate_date(week_start_date, day_of_week):
+    date = datetime.strptime(week_start_date, "%d.%m").replace(year=datetime.now().year)
+    date += timedelta(days=convert_day_to_number(day_of_week))
+    return date.strftime("%d.%m")
+
+
 async def main():
     url = "https://www.polessu.by/ruz/term2/?q=22%D0%98%D0%A2-1"
     content = await get_page_content(url)
     # groups = extract_group_array(content)
-    week_start_dates = extract_week_start_dates(content)
-    print(week_start_dates)
+    # week_start_dates = extract_week_start_dates(content)
+    schedule = extract_schedule(content)
+
+    json_string = json.dumps(schedule, indent=4, ensure_ascii=False)
+    print(json_string)
+    # print(len(schedule))
 
 
 if __name__ == "__main__":
