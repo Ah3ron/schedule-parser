@@ -31,8 +31,7 @@ def extract_group_array(content):
 
     query_array = eval(query_string)
 
-    result = list(map(lambda item: item.strip(), query_array))
-    result = list(filter(lambda item: item and item[0].isdigit(), result))
+    result = [item.strip() for item in query_array if item and item[0].isdigit() and not '(' in item and not ')' in item]
 
     return result
 
@@ -108,6 +107,10 @@ def calculate_date(week_start_date, day_of_week):
     date += timedelta(days=convert_day_to_number(day_of_week))
     return date.strftime("%d.%m")
 
+def check_schedule_exists(content):
+    soup = BeautifulSoup(content, "lxml")
+    error_message = soup.find("p", string="Ничего не найдено.")
+    return error_message is None
 
 async def main():
     url = "https://www.polessu.by/ruz/term2/?q=22%D0%98%D0%A2-1"
