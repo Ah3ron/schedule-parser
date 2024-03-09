@@ -1,10 +1,15 @@
-from datetime import datetime, timedelta
 import asyncio
-import json
-import re
+import logging
+from datetime import datetime, timedelta
 
 import aiohttp
+import pymongo
 from bs4 import BeautifulSoup
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 async def get_page_content(url):
@@ -15,7 +20,7 @@ async def get_page_content(url):
                     content = await response.text()
                     return content
         except aiohttp.ClientError as e:
-            print(f"Ошибка при получении контента страницы: {e}")
+            logger.error(f"Ошибка при получении контента страницы: {e}")
             await asyncio.sleep(1)
     return None
 
@@ -31,7 +36,11 @@ def extract_group_array(content):
 
     query_array = eval(query_string)
 
-    result = [item.strip() for item in query_array if item and item[0].isdigit() and not '(' in item and not ')' in item]
+    result = [
+        item.strip()
+        for item in query_array
+        if item and item[0].isdigit() and not "(" in item and not ")" in item
+    ]
 
     return result
 
@@ -51,9 +60,12 @@ def extract_week_start_dates(content):
     return week_dates
 
 
-def extract_schedule(content):
+async def extract_schedule(content):
     soup = BeautifulSoup(content, "lxml")
     table = soup.find("tbody", id="weeks-filter")
+    if not table:
+        logger.warning("Не удалось найти расписание на странице")
+        return None
 
     schedule = []
     current_day_of_week = None
@@ -107,21 +119,64 @@ def calculate_date(week_start_date, day_of_week):
     date += timedelta(days=convert_day_to_number(day_of_week))
     return date.strftime("%d.%m")
 
-def check_schedule_exists(content):
-    soup = BeautifulSoup(content, "lxml")
-    error_message = soup.find("p", string="Ничего не найдено.")
-    return error_message is None
+
+async def fetch_schedule(group):
+    url = f"https://www.polessu.by/ruz/term2/?f=1&q={group}"
+
+    content = await get_page_content(url)
+    if not content:
+        logger.error(f"Не удалось получить контент страницы для группы {group}")
+        return group, None
+
+    schedule = await extract_schedule(content)
+    if schedule:
+        logger.info(f"Расписание для группы {group} успешно получено")
+    else:
+        logger.warning(f"Не удалось получить расписание для группы {group}")
+
+    return group, schedule
+
 
 async def main():
-    url = "https://www.polessu.by/ruz/term2/?q=22%D0%98%D0%A2-1"
-    content = await get_page_content(url)
-    # groups = extract_group_array(content)
-    # week_start_dates = extract_week_start_dates(content)
-    schedule = extract_schedule(content)
+    # Подключение к MongoDB
+    client = pymongo.MongoClient(
+        "mongodb://mongo:KQhmrZUslwXaoUndBjsKtqWihOhbSknX@roundhouse.proxy.rlwy.net:31633"
+    )
+    db = client["university_schedule"]
 
-    json_string = json.dumps(schedule, indent=4, ensure_ascii=False)
-    print(json_string)
-    # print(len(schedule))
+    # Создание коллекции для расписаний групп
+    schedule_collection = db["schedules"]
+    # Создание коллекции для метаинформации
+    meta_collection = db["meta"]
+
+    url = "https://www.polessu.by/ruz"
+    content = await get_page_content(url)
+    if not content:
+        logger.error("Не удалось получить контент главной страницы")
+        return
+
+    groups = extract_group_array(content)
+
+    all_schedules = {}
+    for group in groups:
+        _, schedule = await fetch_schedule(group)
+        if schedule:
+            # Удаление старого расписания для текущей группы, если оно есть
+            schedule_collection.delete_many({"group": group})
+            # Сохранение нового расписания для текущей группы
+            schedule_collection.insert_one(
+                {
+                    "group": group,
+                    "schedule": schedule,
+                }
+            )
+            all_schedules[group] = schedule
+
+    # Сохранение информации о расписаниях и списках доступных групп
+    meta_collection.delete_many({})
+    meta_collection.insert_one(
+        {"last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "groups": groups}
+    )
 
 
 if __name__ == "__main__":
