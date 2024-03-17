@@ -3,13 +3,41 @@ import logging
 from datetime import datetime, timedelta
 
 import aiohttp
-import pymongo
+import asyncpg
 from bs4 import BeautifulSoup
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+async def get_or_create_table(conn):
+    exists = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = 'lessons'
+        )
+        """
+    )
+    if not exists:
+        await conn.execute(
+            """
+            CREATE TABLE lessons (
+                id SERIAL PRIMARY KEY,
+                group_name VARCHAR(255) NOT NULL,
+                lesson_date VARCHAR(5) NOT NULL,
+                day_of_week VARCHAR(255) NOT NULL,
+                lesson_time VARCHAR(255) NOT NULL,
+                lesson_name VARCHAR(255) NOT NULL,
+                location VARCHAR(255),
+                teacher VARCHAR(255),
+                subgroup VARCHAR(255)
+            )
+            """
+        )
 
 
 async def get_page_content(url):
@@ -92,7 +120,7 @@ async def extract_schedule(content):
                 "name": lesson_info[1].text,
                 "location": lesson_info[2].text or None,
                 "teacher": lesson_info[3].text or None,
-                "group": lesson_info[4].text or None,
+                "subgroup": lesson_info[4].text or None,
             }
 
             schedule.append(lesson)
@@ -121,33 +149,37 @@ def calculate_date(week_start_date, day_of_week):
 
 
 async def fetch_schedule(group):
-    url = f"https://www.polessu.by/ruz/term2/?f=1&q={group}"
+    urls = [
+        f"https://www.polessu.by/ruz/term2/?q={group}&f=1",
+        f"https://www.polessu.by/ruz/term2/?q={group}&f=2",
+        f"https://www.polessu.by/ruz/?q={group}&f=1",
+        f"https://www.polessu.by/ruz/?q={group}&f=2",
+    ]
 
-    content = await get_page_content(url)
-    if not content:
-        logger.error(f"Не удалось получить контент страницы для группы {group}")
-        return group, None
+    all_schedules = {}
 
-    schedule = await extract_schedule(content)
-    if schedule:
-        logger.info(f"Расписание для группы {group} успешно получено")
-    else:
-        logger.warning(f"Не удалось получить расписание для группы {group}")
+    for url in urls:
+        content = await get_page_content(url)
+        if not content:
+            logger.error(f"Не удалось получить контент страницы для группы {group}")
+            continue
 
-    return group, schedule
+        schedule = await extract_schedule(content)
+        if schedule:
+            logger.info(f"Расписание для группы {group} успешно получено")
+            all_schedules[group] = schedule
+        else:
+            logger.warning(f"Не удалось получить расписание для группы {group}")
+
+    return group, all_schedules.get(group)
 
 
 async def main():
-    # Подключение к MongoDB
-    client = pymongo.MongoClient(
-        "mongodb://mongo:KQhmrZUslwXaoUndBjsKtqWihOhbSknX@roundhouse.proxy.rlwy.net:31633"
+    conn = await asyncpg.connect(
+        "postgresql://postgres:WKGylwALZFqzCNcDZcBQsrHFSnZyhxrU@roundhouse.proxy.rlwy.net:36744/railway"
     )
-    db = client["university_schedule"]
 
-    # Создание коллекции для расписаний групп
-    schedule_collection = db["schedules"]
-    # Создание коллекции для метаинформации
-    meta_collection = db["meta"]
+    await get_or_create_table(conn)
 
     url = "https://www.polessu.by/ruz"
     content = await get_page_content(url)
@@ -161,23 +193,34 @@ async def main():
     for group in groups:
         _, schedule = await fetch_schedule(group)
         if schedule:
-            # Удаление старого расписания для текущей группы, если оно есть
-            schedule_collection.delete_many({"group": group})
-            # Сохранение нового расписания для текущей группы
-            schedule_collection.insert_one(
-                {
-                    "group": group,
-                    "schedule": schedule,
-                }
-            )
-            all_schedules[group] = schedule
+            await conn.execute("DELETE FROM lessons WHERE group_name = $1", group)
+            for lesson in schedule:
+                await conn.execute(
+                    """
+                    INSERT INTO lessons (
+                        group_name, 
+                        lesson_date, 
+                        day_of_week, 
+                        lesson_time, 
+                        lesson_name, 
+                        location, 
+                        teacher, 
+                        subgroup
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    group,
+                    lesson["date"],
+                    lesson["day_of_week"],
+                    lesson["time"],
+                    lesson["name"],
+                    lesson["location"],
+                    lesson["teacher"],
+                    lesson["subgroup"],
+                )
 
-    # Сохранение информации о расписаниях и списках доступных групп
-    meta_collection.delete_many({})
-    meta_collection.insert_one(
-        {"last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "groups": groups}
-    )
+    await conn.close()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
