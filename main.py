@@ -75,21 +75,78 @@ async def fetch_page_content(session, url):
 def extract_group_array(soup):
     result = []
     script_tag = soup.find("script", src=False)
-    if script_tag:
-        script_content = script_tag.string
-        start_index = script_content.find("var query = [")
-        end_index = script_content.find("];", start_index)
-        if start_index != -1 and end_index != -1:
-            query_string = script_content[
-                start_index + len("var query = ") : end_index + 1
-            ]
-            query_array = eval(query_string)
-            result = [
-                item.strip()
-                for item in query_array
-                if item and item[0].isdigit() and "(" not in item and ")" not in item
-            ]
+    if not script_tag:
+        return result
+
+    script_content = script_tag.string
+    start_index = script_content.find("var query = [")
+    end_index = script_content.find("];", start_index)
+
+    if start_index == -1 or end_index == -1:
+        return result
+
+    query_string = script_content[start_index + len("var query = ") : end_index + 1]
+    query_array = eval(query_string)
+    result = [
+        item.strip()
+        for item in query_array
+        if item and item[0].isdigit() and "(" not in item and ")" not in item
+    ]
     return result
+
+
+def get_week_start_dates(soup):
+    week_start_dates = {}
+    for li in soup.find("ul", id="weeks-menu").find_all("li"):
+        if not li.a or li.a["href"] == "#":
+            continue
+        week_num = li.a["href"][2:]
+        week_start_dates[week_num] = li.a.text.split("(")[1][:5]
+    return week_start_dates
+
+
+def extract_lessons(table, week_start_dates):
+    schedule = []
+    current_day_of_week = None
+
+    for row in table.find_all("tr"):
+        if "wa" in row["class"]:
+            current_day_of_week = row.find("th").text
+            continue
+
+        for class_name in row["class"]:
+            if not class_name.startswith("w"):
+                continue
+
+            lesson_info = row.find_all("td")
+
+            lesson = {
+                "date": calculate_date(
+                    week_start_dates[class_name[1:]], current_day_of_week
+                ),
+                "day_of_week": current_day_of_week,
+                "time": lesson_info[0].text,
+                "name": lesson_info[1].text,
+                "location": lesson_info[2].text or None,
+                "teacher": lesson_info[3].text or None,
+                "subgroup": lesson_info[4].text or None,
+            }
+
+            schedule.append(lesson)
+
+    return schedule
+
+
+async def parse_schedule(content):
+    soup = BeautifulSoup(content, "lxml")
+    table = soup.find("tbody", id="weeks-filter")
+    if not table:
+        logger.warning("Failed to find schedule on the page")
+        return None
+
+    week_start_dates = get_week_start_dates(soup)
+    schedule = extract_lessons(table, week_start_dates)
+    return schedule
 
 
 async def extract_schedule(session, group):
@@ -103,56 +160,14 @@ async def extract_schedule(session, group):
 
     for url in urls:
         content = await fetch_page_content(session, url)
-        if not content:
+        if content:
+            schedule = await parse_schedule(content)
+            if schedule:
+                all_schedules[group] = schedule
+                logger.info(f"Schedule for group {group} successfully fetched")
+                break
+        else:
             logger.error(f"Failed to fetch page content for group {group}")
-            continue
-
-        soup = BeautifulSoup(content, "lxml")
-        table = soup.find("tbody", id="weeks-filter")
-        if not table:
-            logger.warning("Failed to find schedule on the page")
-            continue
-
-        current_day_of_week = None
-        week_start_dates = {}
-
-        for li in soup.find("ul", id="weeks-menu").find_all("li"):
-            if not li.a:
-                continue
-            if li.a["href"] == "#":
-                continue
-            week_num = li.a["href"][2:]
-            week_start_dates[week_num] = li.a.text.split("(")[1][:5]
-
-        schedule = []
-        for row in table.find_all("tr"):
-            if "wa" in row["class"]:
-                current_day_of_week = row.find("th").text
-                continue
-
-            for class_name in row["class"]:
-                if not class_name.startswith("w"):
-                    continue
-
-                lesson_info = row.find_all("td")
-
-                lesson = {
-                    "date": calculate_date(
-                        week_start_dates[class_name[1:]], current_day_of_week
-                    ),
-                    "day_of_week": current_day_of_week,
-                    "time": lesson_info[0].text,
-                    "name": lesson_info[1].text,
-                    "location": lesson_info[2].text or None,
-                    "teacher": lesson_info[3].text or None,
-                    "subgroup": lesson_info[4].text or None,
-                }
-
-                schedule.append(lesson)
-
-        all_schedules[group] = schedule
-        logger.info(f"Schedule for group {group} successfully fetched")
-        break
 
     return group, all_schedules.get(group)
 
