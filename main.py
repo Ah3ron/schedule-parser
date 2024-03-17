@@ -47,14 +47,14 @@ async def get_or_create_table(conn):
             """
             CREATE TABLE lessons (
                 id SERIAL PRIMARY KEY,
-                group_name VARCHAR(255) NOT NULL,
-                lesson_date VARCHAR(5) NOT NULL,
-                day_of_week VARCHAR(255) NOT NULL,
-                lesson_time VARCHAR(255) NOT NULL,
-                lesson_name VARCHAR(255) NOT NULL,
-                location VARCHAR(255),
-                teacher VARCHAR(255),
-                subgroup VARCHAR(255)
+                group_name VARCHAR(20) NOT NULL,
+                lesson_date VARCHAR(10) NOT NULL,
+                day_of_week VARCHAR(20) NOT NULL,
+                lesson_time VARCHAR(20) NOT NULL,
+                lesson_name VARCHAR(100) NOT NULL,
+                location VARCHAR(10),
+                teacher VARCHAR(100),
+                subgroup VARCHAR(20)
             )
             """
         )
@@ -225,3 +225,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
