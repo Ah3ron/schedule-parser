@@ -47,14 +47,14 @@ async def get_or_create_table(conn):
             """
             CREATE TABLE lessons (
                 id SERIAL PRIMARY KEY,
-                group_name VARCHAR(20) NOT NULL,
-                lesson_date VARCHAR(10) NOT NULL,
-                day_of_week VARCHAR(20) NOT NULL,
-                lesson_time VARCHAR(20) NOT NULL,
-                lesson_name VARCHAR(100) NOT NULL,
-                location VARCHAR(10),
-                teacher VARCHAR(100),
-                subgroup VARCHAR(20)
+                group_name VARCHAR(16) NOT NULL,
+                lesson_date VARCHAR(8) NOT NULL,
+                day_of_week VARCHAR(12) NOT NULL,
+                lesson_time VARCHAR(16) NOT NULL,
+                lesson_name VARCHAR(192) NOT NULL,
+                location VARCHAR(32),
+                teacher VARCHAR(512),
+                subgroup VARCHAR(16)
             )
             """
         )
@@ -174,7 +174,7 @@ async def extract_schedule(session, group):
 
 async def main():
     conn = await asyncpg.connect(
-        "postgresql://postgres:WKGylwALZFqzCNcDZcBQsrHFSnZyhxrU@roundhouse.proxy.rlwy.net:36744/railway"
+        "postgresql://postgres:XXeznXKTkPWAnezWHCDgfpZXmiLHLFxr@viaduct.proxy.rlwy.net:24755/railway"
     )
 
     await get_or_create_table(conn)
@@ -193,36 +193,44 @@ async def main():
 
         results = await asyncio.gather(*tasks)
 
+        batch_data = []
+
         for group, schedule in results:
             if schedule:
-                await conn.execute("DELETE FROM lessons WHERE group_name = $1", group)
                 for lesson in schedule:
-                    await conn.execute(
-                        """
-                        INSERT INTO lessons (
-                            group_name, 
-                            lesson_date, 
-                            day_of_week, 
-                            lesson_time, 
-                            lesson_name, 
-                            location, 
-                            teacher, 
-                            subgroup
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        """,
-                        group,
-                        lesson["date"],
-                        lesson["day_of_week"],
-                        lesson["time"],
-                        lesson["name"],
-                        lesson["location"],
-                        lesson["teacher"],
-                        lesson["subgroup"],
+                    batch_data.append(
+                        (
+                            group,
+                            lesson["date"],
+                            lesson["day_of_week"],
+                            lesson["time"],
+                            lesson["name"],
+                            lesson["location"],
+                            lesson["teacher"],
+                            lesson["subgroup"],
+                        )
                     )
+
+        if batch_data:
+            await conn.execute("DELETE FROM lessons")
+            await conn.executemany(
+                """
+                INSERT INTO lessons (
+                    group_name, 
+                    lesson_date, 
+                    day_of_week, 
+                    lesson_time, 
+                    lesson_name, 
+                    location, 
+                    teacher, 
+                    subgroup
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                batch_data,
+            )
 
     await conn.close()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
