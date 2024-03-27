@@ -53,9 +53,14 @@ async def get_or_create_table(conn):
                 lesson_time VARCHAR(16) NOT NULL,
                 lesson_name VARCHAR(192) NOT NULL,
                 location VARCHAR(32),
-                teacher VARCHAR(512),
+                teacher VARCHAR(384),
                 subgroup VARCHAR(16)
-            )
+            );
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX idx_lesson_date_and_group_name ON lessons (lesson_date, group_name);
             """
         )
 
