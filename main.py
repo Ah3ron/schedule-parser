@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import aiohttp
 import asyncpg
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -224,6 +225,7 @@ async def fetch_last_update_date(session, url):
 
 async def main():
     while True:
+        load_dotenv()
         conn = await asyncpg.connect(os.getenv("DATABASE_URL"))
 
         await get_or_create_table(conn)
