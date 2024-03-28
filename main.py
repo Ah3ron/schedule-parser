@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import re
+import time
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -222,9 +224,7 @@ async def fetch_last_update_date(session, url):
 
 async def main():
     while True:
-        conn = await asyncpg.connect(
-            "postgresql://postgres:rMkeBsTlbdJqOMhlmqQIzXWrLUbHIALd@roundhouse.proxy.rlwy.net:25884/railway"
-        )
+        conn = await asyncpg.connect(os.getenv("DATABASE_URL"))
 
         await get_or_create_table(conn)
 
@@ -275,6 +275,7 @@ async def main():
 
                 if batch_data:
                     await conn.execute("DELETE FROM lessons")
+                    start = time.time()
                     await conn.executemany(
                         """
                         INSERT INTO lessons (
@@ -289,6 +290,9 @@ async def main():
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         """,
                         batch_data,
+                    )
+                    logger.info(
+                        f"The new schedule was saved in {time.time() - start:.2f} seconds\n"
                     )
 
                 await conn.execute(
