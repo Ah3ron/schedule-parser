@@ -6,6 +6,6 @@ COPY . .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN chmod +x start_bot.sh
+RUN chmod +x start_parser.sh
 
-CMD ["./start_bot.sh"]
+CMD ["./start_parser.sh"]
