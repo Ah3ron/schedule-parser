@@ -1,10 +1,11 @@
-FROM python:3
+FROM python:3.12
 
 WORKDIR /app
 
-COPY requirements.txt ./
+COPY . .
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . /app
+RUN chmod +x start_bot.sh
 
-CMD [ "python", "main.py" ]
+CMD ["./start_bot.sh"]
