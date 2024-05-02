@@ -2,5 +2,5 @@
 
 while true; do
 	python main.py
-	sleep 2h
+	sleep 7200
 done
