@@ -240,7 +240,8 @@ async def main():
         stored_last_update_date = await conn.fetchval(
             "SELECT MAX(last_update_date) FROM schedule_updates"
         )
-        if stored_last_update_date and last_update_date != stored_last_update_date:
+
+        if stored_last_update_date and (last_update_date == stored_last_update_date):
             logger.info("No new schedule update available")
         else:
             content = await fetch_page_content(session, url)
