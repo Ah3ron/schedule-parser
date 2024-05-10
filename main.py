@@ -224,62 +224,61 @@ async def fetch_last_update_date(session, url):
 
 
 async def main():
-    while True:
-        load_dotenv()
-        conn = await asyncpg.connect(os.getenv("DATABASE_URL"))
+    load_dotenv()
+    conn = await asyncpg.connect(os.getenv("DATABASE_URL"))
 
-        await get_or_create_table(conn)
+    await get_or_create_table(conn)
 
-        url = "https://www.polessu.by/ruz"
-        async with aiohttp.ClientSession() as session:
-            last_update_date = await fetch_last_update_date(session, url)
-            if not last_update_date:
-                logger.error("Failed to fetch last update date")
+    url = "https://www.polessu.by/ruz"
+    async with aiohttp.ClientSession() as session:
+        last_update_date = await fetch_last_update_date(session, url)
+        if not last_update_date:
+            logger.error("Failed to fetch last update date")
+            await conn.close()
+            return
+
+        stored_last_update_date = await conn.fetchval(
+            "SELECT MAX(last_update_date) FROM schedule_updates"
+        )
+        if stored_last_update_date and last_update_date <= stored_last_update_date:
+            logger.info("No new schedule update available")
+        else:
+            content = await fetch_page_content(session, url)
+            if not content:
+                logger.error("Failed to fetch content from the main page")
                 await conn.close()
                 return
 
-            stored_last_update_date = await conn.fetchval(
-                "SELECT MAX(last_update_date) FROM schedule_updates"
-            )
-            if stored_last_update_date and last_update_date <= stored_last_update_date:
-                logger.info("No new schedule update available")
-            else:
-                content = await fetch_page_content(session, url)
-                if not content:
-                    logger.error("Failed to fetch content from the main page")
-                    await conn.close()
-                    return
+            soup = BeautifulSoup(content, "lxml")
+            group_array = extract_group_array(soup)
 
-                soup = BeautifulSoup(content, "lxml")
-                group_array = extract_group_array(soup)
+            tasks = [extract_schedule(session, group) for group in group_array]
 
-                tasks = [extract_schedule(session, group) for group in group_array]
+            results = await asyncio.gather(*tasks)
 
-                results = await asyncio.gather(*tasks)
+            batch_data = []
 
-                batch_data = []
-
-                for group, schedule in results:
-                    if schedule:
-                        for lesson in schedule:
-                            batch_data.append(
-                                (
-                                    group,
-                                    lesson["date"],
-                                    lesson["day_of_week"],
-                                    lesson["time"],
-                                    lesson["name"],
-                                    lesson["location"],
-                                    lesson["teacher"],
-                                    lesson["subgroup"],
-                                )
+            for group, schedule in results:
+                if schedule:
+                    for lesson in schedule:
+                        batch_data.append(
+                            (
+                                group,
+                                lesson["date"],
+                                lesson["day_of_week"],
+                                lesson["time"],
+                                lesson["name"],
+                                lesson["location"],
+                                lesson["teacher"],
+                                lesson["subgroup"],
                             )
+                        )
 
-                if batch_data:
-                    await conn.execute("DELETE FROM lessons")
-                    start = time.time()
-                    await conn.executemany(
-                        """
+            if batch_data:
+                await conn.execute("DELETE FROM lessons")
+                start = time.time()
+                await conn.executemany(
+                    """
                         INSERT INTO lessons (
                             group_name, 
                             lesson_date, 
@@ -291,22 +290,20 @@ async def main():
                             subgroup
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         """,
-                        batch_data,
-                    )
-                    logger.info(
-                        f"The new schedule was saved in {time.time() - start:.2f} seconds\n"
-                    )
-
-                await conn.execute(
-                    """
-                    INSERT INTO schedule_updates (last_update_date) VALUES ($1)
-                    """,
-                    last_update_date,
+                    batch_data,
+                )
+                logger.info(
+                    f"The new schedule was saved in {time.time() - start:.2f} seconds\n"
                 )
 
-            await asyncio.sleep(600)
+            await conn.execute(
+                """
+                    INSERT INTO schedule_updates (last_update_date) VALUES ($1)
+                    """,
+                last_update_date,
+            )
 
-        await conn.close()
+    await conn.close()
 
 
 if __name__ == "__main__":
