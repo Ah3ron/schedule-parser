@@ -10,13 +10,11 @@ import asyncpg
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-# Logging configuration
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# Constants
 WEEKDAY_TO_NUMBER = {
     "Понедельник": 0,
     "Вторник": 1,
@@ -29,7 +27,6 @@ WEEKDAY_TO_NUMBER = {
 BASE_URL = "https://www.polessu.by/ruz/"
 
 
-# Utility functions
 def calculate_date(week_start_date, day_of_week):
     date = datetime.strptime(week_start_date, "%d.%m").replace(year=datetime.now().year)
     date += timedelta(days=WEEKDAY_TO_NUMBER[day_of_week])
@@ -137,7 +134,11 @@ async def fetch_last_update_date(session, url):
         if not content:
             return None
         soup = BeautifulSoup(content, "lxml")
-        update_tag = soup.find("div", class_="container").find("p", class_="small")
+
+        containers = soup.find_all("div", class_="container")
+        for container in containers:
+            update_tag = container.find("p", class_="small")
+
         if update_tag:
             date_match = re.search(
                 r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", update_tag.text.strip()
