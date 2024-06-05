@@ -201,26 +201,31 @@ async def extract_schedule(session, group):
 
 
 async def fetch_last_update_date(session, url):
-    content = await fetch_page_content(session, url)
-    if not content:
-        logger.error("Failed to fetch content from the main page")
+    async def get_last_update_date(url):
+        content = await fetch_page_content(session, url)
+        if not content:
+            logger.error(f"Failed to fetch content from the page: {url}")
+            return None
+
+        soup = BeautifulSoup(content, "lxml")
+        last_update_tag = soup.find("div", class_="container").find("p", class_="small")
+
+        if last_update_tag:
+            date_match = re.search(
+                r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", last_update_tag.text.strip()
+            )
+            if date_match:
+                return datetime.strptime(date_match.group(), "%d.%m.%Y %H:%M")
+
+        logger.error(f"Failed to find last update information on the page: {url}")
         return None
 
-    soup = BeautifulSoup(content, "lxml")
-    containers = soup.find_all("div", class_="container")
+    main_date = await get_last_update_date(url)
+    term2_date = await get_last_update_date(url + "term2")
 
-    for container in containers:
-        last_update_tag = container.find("p", class_="small")
-        if last_update_tag:
-            last_update_text = last_update_tag.text.strip()
-            date_match = re.search(r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", last_update_text)
-            if date_match:
-                last_update_str = date_match.group()
-                last_update_date = datetime.strptime(last_update_str, "%d.%m.%Y %H:%M")
-                return last_update_date
-
-    logger.error("Failed to find last update information on the page")
-    return None
+    if main_date and term2_date:
+        return max(main_date, term2_date)
+    return main_date or term2_date
 
 
 async def main():
@@ -229,7 +234,7 @@ async def main():
 
     await get_or_create_table(conn)
 
-    url = "https://www.polessu.by/ruz"
+    url = "https://www.polessu.by/ruz/"
     async with aiohttp.ClientSession() as session:
         last_update_date = await fetch_last_update_date(session, url)
         if not last_update_date:
